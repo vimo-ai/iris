@@ -1,0 +1,22 @@
+[package]
+name = "akin"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "akin"
+path = "src/bin/akin.rs"
+
+[dependencies]
+lsp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+reqwest.workspace = true
+ndarray.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+anyhow = "1"

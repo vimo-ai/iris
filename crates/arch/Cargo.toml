@@ -1,0 +1,16 @@
+[package]
+name = "arch"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+lsp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
