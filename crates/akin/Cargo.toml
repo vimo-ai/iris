@@ -4,10 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "akin"
-path = "src/bin/akin.rs"
-
-[[bin]]
 name = "akin-hook"
 path = "src/bin/hook.rs"
 

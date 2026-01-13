@@ -5,8 +5,7 @@ LSP-powered code analysis toolkit for Rust and Swift.
 ## Installation
 
 ```bash
-cargo install --path crates/akin
-cargo install --path crates/arch
+cargo install --path .
 ```
 
 ## Dependencies
@@ -19,36 +18,57 @@ cargo install --path crates/arch
 ollama pull bge-m3
 ```
 
-## akin - Code Similarity Detection
+## Usage
+
+### akin - Code Similarity Detection
 
 ```bash
 # Index project
-akin index /path/to/project -l rust
+iris akin index /path/to/project -l rust
 
 # Scan for similar code
-akin scan --all -t 0.85
+iris akin scan --all -t 0.85
 
 # Cross-project comparison
-akin compare /project-a --lang-a swift /project-b --lang-b swift
+iris akin compare /project-a --lang-a swift /project-b --lang-b swift
 
 # View status
-akin status /path/to/project
-akin projects
-akin pairs -s new -l 20
+iris akin status /path/to/project
+iris akin projects
+iris akin pairs -s new -l 20
 
 # Ignore pairs
-akin ignore "module::func_a" "module::func_b"
+iris akin ignore "module::func_a" "module::func_b"
 
 # Group management
-akin group create "utils" -r "common utilities"
-akin group add 1 "module::helper"
-akin group list
+iris akin group create "utils" -r "common utilities"
+iris akin group add 1 "module::helper"
+iris akin group list
+```
+
+### arch - Architecture Analysis
+
+```bash
+# Generate call graph
+iris arch diagram /path/to/project -l rust
+iris arch diagram /path/to/project -l swift -m  # module level
+
+# Detect dead code
+iris arch dead-code /path/to/project -l rust
+iris arch dead-code /path/to/project --json
+
+# Call tree analysis
+iris arch call-tree /path/to/project main -l rust -d 5
+iris arch call-tree /path/to/project foo -i  # incoming: who calls it
 ```
 
 ### Claude Code Hook
 
 ```bash
-# Set environment variables
+cargo install --path crates/akin  # installs akin-hook
+```
+
+```bash
 export AKIN_DB_PATH="$HOME/.akin/akin.db"
 export AKIN_SIMILARITY_THRESHOLD=0.85
 ```
@@ -63,22 +83,6 @@ export AKIN_SIMILARITY_THRESHOLD=0.85
     }]
   }
 }
-```
-
-## arch - Architecture Analysis
-
-```bash
-# Generate call graph
-arch diagram /path/to/project -l rust
-arch diagram /path/to/project -l swift -m  # module level
-
-# Detect dead code
-arch dead-code /path/to/project -l rust
-arch dead-code /path/to/project --json
-
-# Call tree analysis
-arch call-tree /path/to/project main -l rust -d 5
-arch call-tree /path/to/project foo -i  # incoming: who calls it
 ```
 
 ## Library Usage
