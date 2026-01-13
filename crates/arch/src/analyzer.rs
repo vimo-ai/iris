@@ -1,4 +1,4 @@
-use lsp::{FunctionNode, LanguageAdapter};
+use lsp::{FunctionNode, FunctionRef, LanguageAdapter};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -12,7 +12,8 @@ pub type Result<T> = std::result::Result<T, ArchError>;
 
 /// 架构分析器
 pub struct ArchitectureAnalyzer {
-    functions: HashMap<String, FunctionNode>,
+    /// 函数映射: (file_path, line) -> FunctionNode
+    functions: HashMap<FunctionRef, FunctionNode>,
 }
 
 impl ArchitectureAnalyzer {
@@ -33,32 +34,39 @@ impl ArchitectureAnalyzer {
             .map_err(|e| ArchError::Lsp(e.to_string()))?;
 
         for unit in &units {
-            let key = format!(
-                "{}:{}:{}",
-                unit.file_path,
-                unit.selection_line,
-                unit.qualified_name.split("::").last().unwrap_or(&unit.qualified_name)
-            );
+            let key = FunctionRef::new(unit.file_path.clone(), unit.selection_line);
 
             let hierarchy = adapter
                 .get_call_hierarchy(unit)
                 .await
                 .map_err(|e| ArchError::Lsp(e.to_string()))?;
 
+            // 直接使用 FunctionRef，无需格式转换
+            let callers: Vec<FunctionRef> = hierarchy
+                .incoming
+                .iter()
+                .map(|c| c.as_ref())
+                .collect();
+
+            let callees: Vec<FunctionRef> = hierarchy
+                .outgoing
+                .iter()
+                .map(|c| c.as_ref())
+                .collect();
+
+            // 提取短名字用于显示
+            let short_name = unit.qualified_name
+                .split("::")
+                .last()
+                .unwrap_or(&unit.qualified_name)
+                .to_string();
+
             let node = FunctionNode {
-                name: unit.qualified_name.clone(),
                 file_path: unit.file_path.clone(),
                 line: unit.selection_line,
-                callers: hierarchy
-                    .incoming
-                    .iter()
-                    .map(|c| c.stable_id())
-                    .collect(),
-                callees: hierarchy
-                    .outgoing
-                    .iter()
-                    .map(|c| c.stable_id())
-                    .collect(),
+                name: short_name,
+                callers,
+                callees,
             };
 
             self.functions.insert(key, node);
@@ -98,32 +106,48 @@ impl ArchitectureAnalyzer {
     pub fn get_call_tree(&self, root: &str, direction: CallDirection, max_depth: usize) -> Vec<CallTreeNode> {
         let mut result = Vec::new();
         let mut visited = std::collections::HashSet::new();
-        self.build_tree(root, direction, 0, max_depth, &mut visited, &mut result);
+
+        // 查找起始节点
+        let start_ref = self.find_function_ref(root);
+        if let Some(func_ref) = start_ref {
+            self.build_tree(&func_ref, direction, 0, max_depth, &mut visited, &mut result);
+        }
         result
+    }
+
+    /// 通过名字查找函数引用
+    fn find_function_ref(&self, name: &str) -> Option<FunctionRef> {
+        // 精确匹配短名字
+        self.functions.iter()
+            .find(|(_, node)| node.name == name)
+            .map(|(k, _)| k.clone())
+            // 或者后缀匹配
+            .or_else(|| {
+                self.functions.iter()
+                    .find(|(_, node)| node.name.ends_with(&format!("::{}", name)))
+                    .map(|(k, _)| k.clone())
+            })
     }
 
     fn build_tree(
         &self,
-        name: &str,
+        func_ref: &FunctionRef,
         direction: CallDirection,
         depth: usize,
         max_depth: usize,
-        visited: &mut std::collections::HashSet<String>,
+        visited: &mut std::collections::HashSet<FunctionRef>,
         result: &mut Vec<CallTreeNode>,
     ) {
-        if depth > max_depth || visited.contains(name) {
+        if depth > max_depth || visited.contains(func_ref) {
             return;
         }
-        visited.insert(name.to_string());
+        visited.insert(func_ref.clone());
 
-        // 支持通过 key (file:line:name)、qualified_name 或 short name 查找
-        let node = self.functions.get(name)
-            .or_else(|| self.functions.values().find(|n| n.name == name))
-            .or_else(|| self.functions.values().find(|n| n.name.ends_with(&format!("::{}", name))));
-
-        if let Some(node) = node {
+        if let Some(node) = self.functions.get(func_ref) {
             result.push(CallTreeNode {
                 name: node.name.clone(),
+                file_path: node.file_path.clone(),
+                line: node.line,
                 depth,
             });
 
@@ -139,14 +163,15 @@ impl ArchitectureAnalyzer {
     }
 
     /// 获取所有函数
-    pub fn functions(&self) -> &HashMap<String, FunctionNode> {
+    pub fn functions(&self) -> &HashMap<FunctionRef, FunctionNode> {
         &self.functions
     }
 
     /// 添加函数节点 (用于测试)
     #[doc(hidden)]
-    pub fn add_function(&mut self, key: &str, node: FunctionNode) {
-        self.functions.insert(key.to_string(), node);
+    pub fn add_function(&mut self, file_path: &str, line: u32, node: FunctionNode) {
+        let key = FunctionRef::new(file_path.to_string(), line);
+        self.functions.insert(key, node);
     }
 }
 
@@ -165,6 +190,8 @@ pub enum CallDirection {
 #[derive(Debug, Clone)]
 pub struct CallTreeNode {
     pub name: String,
+    pub file_path: String,
+    pub line: u32,
     pub depth: usize,
 }
 
@@ -172,46 +199,53 @@ pub struct CallTreeNode {
 mod tests {
     use super::*;
 
-    fn make_node(name: &str, callers: Vec<&str>, callees: Vec<&str>) -> FunctionNode {
+    fn make_node(name: &str, callers: Vec<(&str, u32)>, callees: Vec<(&str, u32)>) -> FunctionNode {
         FunctionNode {
-            name: name.to_string(),
             file_path: "/test/file.rs".to_string(),
             line: 1,
-            callers: callers.into_iter().map(String::from).collect(),
-            callees: callees.into_iter().map(String::from).collect(),
+            name: name.to_string(),
+            callers: callers.into_iter().map(|(f, l)| FunctionRef::new(f.to_string(), l)).collect(),
+            callees: callees.into_iter().map(|(f, l)| FunctionRef::new(f.to_string(), l)).collect(),
         }
     }
 
     #[test]
     fn test_is_entry_point_main() {
-        let node = make_node("my_crate::main", vec![], vec![]);
+        let node = make_node("main", vec![], vec![]);
         assert!(ArchitectureAnalyzer::is_entry_point(&node));
     }
 
     #[test]
     fn test_is_entry_point_test() {
-        let node = make_node("my_crate::test_something", vec![], vec![]);
+        let node = make_node("test_something", vec![], vec![]);
         assert!(ArchitectureAnalyzer::is_entry_point(&node));
     }
 
     #[test]
     fn test_is_entry_point_new() {
-        let node = make_node("MyStruct::new", vec![], vec![]);
+        let node = make_node("new", vec![], vec![]);
         assert!(ArchitectureAnalyzer::is_entry_point(&node));
     }
 
     #[test]
     fn test_is_entry_point_regular_function() {
-        let node = make_node("my_crate::helper_function", vec![], vec![]);
+        let node = make_node("helper_function", vec![], vec![]);
         assert!(!ArchitectureAnalyzer::is_entry_point(&node));
     }
 
     #[test]
     fn test_find_dead_code_no_callers() {
         let mut analyzer = ArchitectureAnalyzer::new();
-        analyzer.add_function("k1", make_node("foo", vec![], vec!["bar"]));
-        analyzer.add_function("k2", make_node("bar", vec!["foo"], vec![]));
-        analyzer.add_function("k3", make_node("unused", vec![], vec![]));
+
+        let mut foo = make_node("foo", vec![], vec![]);
+        foo.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 2)];
+        analyzer.add_function("/test/file.rs", 1, foo);
+
+        let mut bar = make_node("bar", vec![], vec![]);
+        bar.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        analyzer.add_function("/test/file.rs", 2, bar);
+
+        analyzer.add_function("/test/file.rs", 3, make_node("unused", vec![], vec![]));
 
         let dead = analyzer.find_dead_code();
         assert_eq!(dead.len(), 2); // foo and unused have no callers
@@ -223,8 +257,14 @@ mod tests {
     #[test]
     fn test_find_dead_code_excludes_entry_points() {
         let mut analyzer = ArchitectureAnalyzer::new();
-        analyzer.add_function("k1", make_node("main", vec![], vec!["foo"]));
-        analyzer.add_function("k2", make_node("foo", vec!["main"], vec![]));
+
+        let mut main_node = make_node("main", vec![], vec![]);
+        main_node.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 2)];
+        analyzer.add_function("/test/file.rs", 1, main_node);
+
+        let mut foo = make_node("foo", vec![], vec![]);
+        foo.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        analyzer.add_function("/test/file.rs", 2, foo);
 
         let dead = analyzer.find_dead_code();
         assert!(dead.is_empty()); // main is entry point, foo has caller
@@ -233,10 +273,26 @@ mod tests {
     #[test]
     fn test_get_call_tree_outgoing() {
         let mut analyzer = ArchitectureAnalyzer::new();
-        analyzer.add_function("k1", make_node("root", vec![], vec!["child1", "child2"]));
-        analyzer.add_function("k2", make_node("child1", vec!["root"], vec!["grandchild"]));
-        analyzer.add_function("k3", make_node("child2", vec!["root"], vec![]));
-        analyzer.add_function("k4", make_node("grandchild", vec!["child1"], vec![]));
+
+        let mut root = make_node("root", vec![], vec![]);
+        root.callees = vec![
+            FunctionRef::new("/test/file.rs".to_string(), 2),
+            FunctionRef::new("/test/file.rs".to_string(), 3),
+        ];
+        analyzer.add_function("/test/file.rs", 1, root);
+
+        let mut child1 = make_node("child1", vec![], vec![]);
+        child1.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        child1.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 4)];
+        analyzer.add_function("/test/file.rs", 2, child1);
+
+        let mut child2 = make_node("child2", vec![], vec![]);
+        child2.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        analyzer.add_function("/test/file.rs", 3, child2);
+
+        let mut grandchild = make_node("grandchild", vec![], vec![]);
+        grandchild.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 2)];
+        analyzer.add_function("/test/file.rs", 4, grandchild);
 
         let tree = analyzer.get_call_tree("root", CallDirection::Outgoing, 3);
 
@@ -248,9 +304,21 @@ mod tests {
     #[test]
     fn test_get_call_tree_incoming() {
         let mut analyzer = ArchitectureAnalyzer::new();
-        analyzer.add_function("k1", make_node("root", vec!["caller1", "caller2"], vec![]));
-        analyzer.add_function("k2", make_node("caller1", vec![], vec!["root"]));
-        analyzer.add_function("k3", make_node("caller2", vec![], vec!["root"]));
+
+        let mut root = make_node("root", vec![], vec![]);
+        root.callers = vec![
+            FunctionRef::new("/test/file.rs".to_string(), 2),
+            FunctionRef::new("/test/file.rs".to_string(), 3),
+        ];
+        analyzer.add_function("/test/file.rs", 1, root);
+
+        let mut caller1 = make_node("caller1", vec![], vec![]);
+        caller1.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        analyzer.add_function("/test/file.rs", 2, caller1);
+
+        let mut caller2 = make_node("caller2", vec![], vec![]);
+        caller2.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        analyzer.add_function("/test/file.rs", 3, caller2);
 
         let tree = analyzer.get_call_tree("root", CallDirection::Incoming, 2);
 
@@ -261,10 +329,24 @@ mod tests {
     #[test]
     fn test_get_call_tree_max_depth() {
         let mut analyzer = ArchitectureAnalyzer::new();
-        analyzer.add_function("k1", make_node("a", vec![], vec!["b"]));
-        analyzer.add_function("k2", make_node("b", vec!["a"], vec!["c"]));
-        analyzer.add_function("k3", make_node("c", vec!["b"], vec!["d"]));
-        analyzer.add_function("k4", make_node("d", vec!["c"], vec![]));
+
+        let mut a = make_node("a", vec![], vec![]);
+        a.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 2)];
+        analyzer.add_function("/test/file.rs", 1, a);
+
+        let mut b = make_node("b", vec![], vec![]);
+        b.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        b.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 3)];
+        analyzer.add_function("/test/file.rs", 2, b);
+
+        let mut c = make_node("c", vec![], vec![]);
+        c.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 2)];
+        c.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 4)];
+        analyzer.add_function("/test/file.rs", 3, c);
+
+        let mut d = make_node("d", vec![], vec![]);
+        d.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 3)];
+        analyzer.add_function("/test/file.rs", 4, d);
 
         let tree = analyzer.get_call_tree("a", CallDirection::Outgoing, 1);
 
@@ -275,34 +357,20 @@ mod tests {
     #[test]
     fn test_get_call_tree_handles_cycles() {
         let mut analyzer = ArchitectureAnalyzer::new();
-        analyzer.add_function("k1", make_node("a", vec!["b"], vec!["b"]));
-        analyzer.add_function("k2", make_node("b", vec!["a"], vec!["a"]));
+
+        let mut a = make_node("a", vec![], vec![]);
+        a.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 2)];
+        a.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 2)];
+        analyzer.add_function("/test/file.rs", 1, a);
+
+        let mut b = make_node("b", vec![], vec![]);
+        b.callers = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        b.callees = vec![FunctionRef::new("/test/file.rs".to_string(), 1)];
+        analyzer.add_function("/test/file.rs", 2, b);
 
         let tree = analyzer.get_call_tree("a", CallDirection::Outgoing, 10);
 
         // Should not infinite loop
         assert_eq!(tree.len(), 2);
-    }
-
-    #[test]
-    fn test_get_call_tree_by_qualified_name() {
-        let mut analyzer = ArchitectureAnalyzer::new();
-        analyzer.add_function("file:1:foo", make_node("my::module::foo", vec![], vec![]));
-
-        // Should find by qualified name
-        let tree = analyzer.get_call_tree("my::module::foo", CallDirection::Outgoing, 1);
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].name, "my::module::foo");
-    }
-
-    #[test]
-    fn test_get_call_tree_by_short_name() {
-        let mut analyzer = ArchitectureAnalyzer::new();
-        analyzer.add_function("file:1:foo", make_node("my::module::foo", vec![], vec![]));
-
-        // Should find by short name
-        let tree = analyzer.get_call_tree("foo", CallDirection::Outgoing, 1);
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].name, "my::module::foo");
     }
 }

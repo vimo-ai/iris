@@ -1,5 +1,5 @@
 use crate::protocol::{LspClient, Result, LspError};
-use crate::types::{CodeUnit, CallHierarchy, CallHierarchyItem as OurCallHierarchyItem};
+use crate::types::{CodeUnit, CallHierarchy, CallHierarchyItem};
 use super::LanguageAdapter;
 use async_trait::async_trait;
 use lsp_types::{DocumentSymbol, SymbolKind};
@@ -158,21 +158,19 @@ impl LanguageAdapter for SwiftAdapter {
         if let Some(item) = items.first() {
             let callers = self.client.incoming_calls(item).await?;
             for call in callers {
-                incoming.push(OurCallHierarchyItem {
+                incoming.push(CallHierarchyItem {
                     name: call.from.name.clone(),
                     file_path: call.from.uri.path().to_string(),
                     line: call.from.selection_range.start.line,
-                    column: call.from.selection_range.start.character,
                 });
             }
 
             let callees = self.client.outgoing_calls(item).await?;
             for call in callees {
-                outgoing.push(OurCallHierarchyItem {
+                outgoing.push(CallHierarchyItem {
                     name: call.to.name.clone(),
                     file_path: call.to.uri.path().to_string(),
                     line: call.to.selection_range.start.line,
-                    column: call.to.selection_range.start.character,
                 });
             }
         }

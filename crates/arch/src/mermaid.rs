@@ -1,6 +1,6 @@
 use crate::analyzer::ArchitectureAnalyzer;
-use lsp::FunctionNode;
-use std::collections::HashMap;
+use lsp::{FunctionNode, FunctionRef};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Mermaid 图生成器
@@ -24,33 +24,34 @@ impl MermaidGenerator {
         let mut lines = vec!["flowchart TD".to_string()];
 
         // 按连接数排序，取前 N 个
-        let mut sorted: Vec<_> = functions.values().collect();
-        sorted.sort_by_key(|n| std::cmp::Reverse(n.callers.len() + n.callees.len()));
+        let mut sorted: Vec<(&FunctionRef, &FunctionNode)> = functions.iter().collect();
+        sorted.sort_by_key(|(_, n)| std::cmp::Reverse(n.callers.len() + n.callees.len()));
         sorted.truncate(self.max_nodes);
 
-        let included: std::collections::HashSet<_> = sorted.iter().map(|n| &n.name).collect();
+        // 使用 FunctionRef 作为 included 集合
+        let included: HashSet<&FunctionRef> = sorted.iter().map(|(r, _)| *r).collect();
 
         // 生成节点
-        for node in &sorted {
-            let short_name = Self::short_name(&node.name);
+        for (func_ref, node) in &sorted {
+            let node_id = Self::ref_to_id(func_ref);
             let style = if node.callers.is_empty() {
-                format!("    {}[[{}]]", Self::node_id(&node.name), short_name)
+                format!("    {}[[{}]]", node_id, node.name)
             } else if node.callees.is_empty() {
-                format!("    {}([{}])", Self::node_id(&node.name), short_name)
+                format!("    {}([{}])", node_id, node.name)
             } else {
-                format!("    {}[{}]", Self::node_id(&node.name), short_name)
+                format!("    {}[{}]", node_id, node.name)
             };
             lines.push(style);
         }
 
         // 生成边
-        for node in &sorted {
+        for (func_ref, node) in &sorted {
             for callee in &node.callees {
                 if included.contains(callee) {
                     lines.push(format!(
                         "    {} --> {}",
-                        Self::node_id(&node.name),
-                        Self::node_id(callee)
+                        Self::ref_to_id(func_ref),
+                        Self::ref_to_id(callee)
                     ));
                 }
             }
@@ -76,7 +77,8 @@ impl MermaidGenerator {
         for node in functions.values() {
             let from_module = Self::extract_module(&node.file_path, workspace);
             for callee in &node.callees {
-                if let Some(callee_node) = functions.values().find(|n| n.name == *callee) {
+                // 直接通过 FunctionRef 查找
+                if let Some(callee_node) = functions.get(callee) {
                     let to_module = Self::extract_module(&callee_node.file_path, workspace);
                     if from_module != to_module {
                         *edges.entry((from_module.clone(), to_module)).or_insert(0) += 1;
@@ -102,6 +104,11 @@ impl MermaidGenerator {
         }
 
         lines.join("\n")
+    }
+
+    /// 将 FunctionRef 转换为 Mermaid 节点 ID
+    fn ref_to_id(func_ref: &FunctionRef) -> String {
+        format!("{}_{}", Self::node_id(&func_ref.file_path), func_ref.line)
     }
 
     #[doc(hidden)]

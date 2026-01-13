@@ -121,14 +121,34 @@ fn regex_replace_numbers(s: &str) -> String {
     result
 }
 
+/// 函数引用 - 唯一标识一个函数
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionRef {
+    pub file_path: String,
+    pub line: u32,
+}
+
+impl FunctionRef {
+    pub fn new(file_path: String, line: u32) -> Self {
+        Self { file_path, line }
+    }
+}
+
 /// 函数节点 - 用于调用图
 #[derive(Debug, Clone)]
 pub struct FunctionNode {
-    pub name: String,
-    pub file_path: String,
-    pub line: u32,
-    pub callers: Vec<String>,
-    pub callees: Vec<String>,
+    pub file_path: String,          // 标识符 part 1
+    pub line: u32,                  // 标识符 part 2
+    pub name: String,               // 显示名
+    pub callers: Vec<FunctionRef>,
+    pub callees: Vec<FunctionRef>,
+}
+
+impl FunctionNode {
+    /// 获取此节点的引用
+    pub fn as_ref(&self) -> FunctionRef {
+        FunctionRef::new(self.file_path.clone(), self.line)
+    }
 }
 
 /// 调用层次
@@ -138,18 +158,18 @@ pub struct CallHierarchy {
     pub outgoing: Vec<CallHierarchyItem>,
 }
 
+/// 调用层次项
 #[derive(Debug, Clone)]
 pub struct CallHierarchyItem {
     pub name: String,
     pub file_path: String,
     pub line: u32,
-    pub column: u32,
 }
 
 impl CallHierarchyItem {
-    /// 唯一标识符 (file:line:name)
-    pub fn stable_id(&self) -> String {
-        format!("{}:{}:{}", self.file_path, self.line, self.name)
+    /// 转换为函数引用
+    pub fn as_ref(&self) -> FunctionRef {
+        FunctionRef::new(self.file_path.clone(), self.line)
     }
 }
 
@@ -247,14 +267,4 @@ mod tests {
         assert!(!normalized.contains("3.14"));
     }
 
-    #[test]
-    fn test_call_hierarchy_item_stable_id() {
-        let item = CallHierarchyItem {
-            name: "foo".to_string(),
-            file_path: "/src/lib.rs".to_string(),
-            line: 42,
-            column: 4,
-        };
-        assert_eq!(item.stable_id(), "/src/lib.rs:42:foo");
-    }
 }
