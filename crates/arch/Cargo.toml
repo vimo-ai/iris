@@ -3,6 +3,10 @@ name = "arch"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "arch"
+path = "src/bin/arch.rs"
+
 [dependencies]
 lsp.workspace = true
 serde.workspace = true
@@ -10,7 +14,9 @@ serde_json.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 clap.workspace = true
+anyhow = "1"
 
 [dev-dependencies]
 tempfile.workspace = true

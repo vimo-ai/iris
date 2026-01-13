@@ -5,5 +5,5 @@
 mod analyzer;
 mod mermaid;
 
-pub use analyzer::ArchitectureAnalyzer;
+pub use analyzer::{ArchitectureAnalyzer, CallDirection, CallTreeNode};
 pub use mermaid::MermaidGenerator;

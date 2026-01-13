@@ -27,11 +27,21 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", features = ["json"] }
 ndarray = "0.16"
 
+# Vector Index (ANN)
+usearch = "2.21"
+cxx = "1.0"
+rayon = "1.10"
+
 # Utils
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"
+
+# Tree-sitter (使用 0.22 系列确保 ABI 兼容)
+tree-sitter = "0.22"
+tree-sitter-rust = "0.21"
+tree-sitter-swift = "0.5"
 
 # Internal
 lsp = { path = "crates/lsp" }

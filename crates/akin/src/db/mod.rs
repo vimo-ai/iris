@@ -1,3 +1,13 @@
+//! 数据库模块 - 管理代码单元、相似配对和分组
+
+mod types;
+mod project;
+mod code_unit;
+mod pairs;
+mod groups;
+
+pub use types::*;
+
 use rusqlite::{Connection, Result as SqliteResult};
 use std::path::Path;
 
@@ -54,7 +64,8 @@ impl Database {
                 status TEXT NOT NULL DEFAULT 'new',
                 trigger_reason TEXT,
                 FOREIGN KEY (unit_a) REFERENCES code_units(qualified_name),
-                FOREIGN KEY (unit_b) REFERENCES code_units(qualified_name)
+                FOREIGN KEY (unit_b) REFERENCES code_units(qualified_name),
+                UNIQUE(unit_a, unit_b)
             );
 
             CREATE TABLE IF NOT EXISTS similarity_groups (
@@ -73,6 +84,4 @@ impl Database {
         )?;
         Ok(())
     }
-
-    // TODO: CRUD operations
 }
