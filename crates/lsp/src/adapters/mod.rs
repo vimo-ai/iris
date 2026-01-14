@@ -1,8 +1,10 @@
 mod rust;
 mod swift;
+mod typescript;
 
 pub use rust::RustAdapter;
 pub use swift::SwiftAdapter;
+pub use typescript::TypeScriptAdapter;
 
 use crate::types::{CodeUnit, CallHierarchy};
 use crate::protocol::Result;

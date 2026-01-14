@@ -7,7 +7,7 @@ use akin::{
 };
 use akin::hook::get_db_path;
 use clap::Subcommand;
-use lsp::{LanguageAdapter, RustAdapter, SwiftAdapter, CodeUnit};
+use lsp::{LanguageAdapter, RustAdapter, SwiftAdapter, TypeScriptAdapter, CodeUnit};
 use sha2::{Sha256, Digest};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ pub enum AkinCommands {
     Index {
         /// Project path
         path: String,
-        /// Language (rust, swift)
+        /// Language (rust, swift, typescript/ts)
         #[arg(short, long, default_value = "rust")]
         lang: String,
         /// Embedding model
@@ -47,13 +47,13 @@ pub enum AkinCommands {
     Compare {
         /// Project A path
         path_a: String,
-        /// Project A language
-        #[arg(long, default_value = "rust")]
+        /// Project A language (rust, swift, typescript/ts)
+        #[arg(long, default_value = "typescript")]
         lang_a: String,
         /// Project B path
         path_b: String,
-        /// Project B language
-        #[arg(long, default_value = "swift")]
+        /// Project B language (rust, swift, typescript/ts)
+        #[arg(long, default_value = "typescript")]
         lang_b: String,
         /// Similarity threshold
         #[arg(short, long, default_value = "0.80")]
@@ -685,6 +685,13 @@ async fn extract_functions_lsp(path: &str, lang: &str) -> anyhow::Result<Vec<Cod
         }
         "swift" => {
             let mut adapter = SwiftAdapter::new(path);
+            adapter.start().await?;
+            let units = adapter.get_functions().await?;
+            adapter.stop()?;
+            Ok(units)
+        }
+        "typescript" | "ts" => {
+            let mut adapter = TypeScriptAdapter::new(path);
             adapter.start().await?;
             let units = adapter.get_functions().await?;
             adapter.stop()?;

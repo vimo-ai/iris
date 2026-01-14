@@ -1,6 +1,6 @@
 # Iris
 
-LSP-powered code analysis toolkit for Rust and Swift.
+LSP-powered code analysis toolkit for Rust, Swift, and TypeScript.
 
 ## Installation
 
@@ -12,9 +12,14 @@ cargo install --path .
 
 - [rust-analyzer](https://rust-analyzer.github.io/) - Rust project analysis
 - [sourcekit-lsp](https://github.com/apple/sourcekit-lsp) - Swift project analysis
+- [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) - TypeScript/JavaScript project analysis
 - [Ollama](https://ollama.ai/) + bge-m3 model - vector embeddings
 
 ```bash
+# TypeScript LSP
+npm install -g typescript-language-server typescript
+
+# Embedding model
 ollama pull bge-m3
 ```
 
@@ -25,12 +30,13 @@ ollama pull bge-m3
 ```bash
 # Index project
 iris akin index /path/to/project -l rust
+iris akin index /path/to/project -l typescript  # or -l ts
 
 # Scan for similar code
 iris akin scan --all -t 0.85
 
 # Cross-project comparison
-iris akin compare /project-a --lang-a swift /project-b --lang-b swift
+iris akin compare /project-a --lang-a typescript /project-b --lang-b typescript
 
 # View status
 iris akin status /path/to/project
@@ -52,10 +58,11 @@ iris akin group list
 # Generate call graph
 iris arch diagram /path/to/project -l rust
 iris arch diagram /path/to/project -l swift -m  # module level
+iris arch diagram /path/to/project -l ts        # TypeScript
 
 # Detect dead code
 iris arch dead-code /path/to/project -l rust
-iris arch dead-code /path/to/project --json
+iris arch dead-code /path/to/project -l typescript --json
 
 # Call tree analysis
 iris arch call-tree /path/to/project main -l rust -d 5
