@@ -59,8 +59,22 @@ impl LspClient {
 
         let stdin = child.stdin.take().ok_or(LspError::NotStarted)?;
         let stdout = child.stdout.take().ok_or(LspError::NotStarted)?;
+        let stderr = child.stderr.take();
 
         self.stdin = Some(stdin);
+
+        // 启动 stderr 读取线程
+        if let Some(stderr) = stderr {
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => tracing::warn!("[LSP stderr] {}", line),
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
 
         // 启动响应读取线程
         let pending = Arc::clone(&self.pending);

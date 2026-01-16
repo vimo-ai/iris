@@ -33,7 +33,15 @@ impl ArchitectureAnalyzer {
             .await
             .map_err(|e| ArchError::Lsp(e.to_string()))?;
 
-        for unit in &units {
+        // 每处理 BATCH_SIZE 个函数后暂停，避免 LSP 服务器过载
+        const BATCH_SIZE: usize = 50;
+        const BATCH_DELAY_MS: u64 = 2000;
+
+        for (idx, unit) in units.iter().enumerate() {
+            if idx > 0 && idx % BATCH_SIZE == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(BATCH_DELAY_MS)).await;
+            }
+
             let key = FunctionRef::new(unit.file_path.clone(), unit.selection_line);
 
             let hierarchy = adapter
