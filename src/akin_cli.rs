@@ -7,7 +7,7 @@ use akin::{
 };
 use akin::hook::get_db_path;
 use clap::Subcommand;
-use lsp::{LanguageAdapter, RustAdapter, SwiftAdapter, TypeScriptAdapter, CodeUnit};
+use lsp::{LanguageAdapter, RustAdapter, SwiftAdapter, TypeScriptAdapter, VueAdapter, JavaAdapter, CodeUnit};
 use sha2::{Sha256, Digest};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -692,6 +692,20 @@ async fn extract_functions_lsp(path: &str, lang: &str) -> anyhow::Result<Vec<Cod
         }
         "typescript" | "ts" => {
             let mut adapter = TypeScriptAdapter::new(path);
+            adapter.start().await?;
+            let units = adapter.get_functions().await?;
+            adapter.stop()?;
+            Ok(units)
+        }
+        "vue" => {
+            let mut adapter = VueAdapter::new(path);
+            adapter.start().await?;
+            let units = adapter.get_functions().await?;
+            adapter.stop()?;
+            Ok(units)
+        }
+        "java" => {
+            let mut adapter = JavaAdapter::new(path);
             adapter.start().await?;
             let units = adapter.get_functions().await?;
             adapter.stop()?;

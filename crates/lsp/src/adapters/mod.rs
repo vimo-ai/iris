@@ -1,10 +1,14 @@
+mod java;
 mod rust;
 mod swift;
 mod typescript;
+mod vue;
 
+pub use java::JavaAdapter;
 pub use rust::RustAdapter;
 pub use swift::SwiftAdapter;
 pub use typescript::TypeScriptAdapter;
+pub use vue::VueAdapter;
 
 use crate::types::{CodeUnit, CallHierarchy};
 use crate::protocol::Result;

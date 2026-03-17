@@ -2,7 +2,7 @@
 
 use arch::{ArchitectureAnalyzer, MermaidGenerator, CallDirection};
 use clap::Subcommand;
-use lsp::{LanguageAdapter, RustAdapter, SwiftAdapter, TypeScriptAdapter};
+use lsp::{LanguageAdapter, RustAdapter, SwiftAdapter, TypeScriptAdapter, VueAdapter, JavaAdapter};
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
@@ -11,7 +11,7 @@ pub enum ArchCommands {
     Diagram {
         /// Project path
         path: String,
-        /// Language (rust, swift, typescript/ts)
+        /// Language (rust, swift, typescript/ts, vue, java)
         #[arg(short, long, default_value = "rust")]
         lang: String,
         /// Generate module-level diagram
@@ -28,7 +28,7 @@ pub enum ArchCommands {
     DeadCode {
         /// Project path
         path: String,
-        /// Language (rust, swift, typescript/ts)
+        /// Language (rust, swift, typescript/ts, vue, java)
         #[arg(short, long, default_value = "rust")]
         lang: String,
         /// JSON output
@@ -41,7 +41,7 @@ pub enum ArchCommands {
         path: String,
         /// Entry function name
         entry: String,
-        /// Language (rust, swift, typescript/ts)
+        /// Language (rust, swift, typescript/ts, vue, java)
         #[arg(short, long, default_value = "rust")]
         lang: String,
         /// Max depth
@@ -99,6 +99,20 @@ async fn cmd_diagram(path: &str, lang: &str, module: bool, max_nodes: usize, out
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             adapter.stop()?;
         }
+        "vue" => {
+            let mut adapter = VueAdapter::new(project_path.to_str().unwrap());
+            adapter.start().await?;
+            analyzer.build_call_graph(&mut adapter).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            adapter.stop()?;
+        }
+        "java" => {
+            let mut adapter = JavaAdapter::new(project_path.to_str().unwrap());
+            adapter.start().await?;
+            analyzer.build_call_graph(&mut adapter).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            adapter.stop()?;
+        }
         _ => anyhow::bail!("Unsupported language: {}", lang),
     }
 
@@ -149,6 +163,20 @@ async fn cmd_dead_code(path: &str, lang: &str, json: bool) -> anyhow::Result<()>
         }
         "typescript" | "ts" => {
             let mut adapter = TypeScriptAdapter::new(project_path.to_str().unwrap());
+            adapter.start().await?;
+            analyzer.build_call_graph(&mut adapter).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            adapter.stop()?;
+        }
+        "vue" => {
+            let mut adapter = VueAdapter::new(project_path.to_str().unwrap());
+            adapter.start().await?;
+            analyzer.build_call_graph(&mut adapter).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            adapter.stop()?;
+        }
+        "java" => {
+            let mut adapter = JavaAdapter::new(project_path.to_str().unwrap());
             adapter.start().await?;
             analyzer.build_call_graph(&mut adapter).await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -216,6 +244,20 @@ async fn cmd_call_tree(path: &str, entry: &str, lang: &str, depth: usize, incomi
         }
         "typescript" | "ts" => {
             let mut adapter = TypeScriptAdapter::new(project_path.to_str().unwrap());
+            adapter.start().await?;
+            analyzer.build_call_graph(&mut adapter).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            adapter.stop()?;
+        }
+        "vue" => {
+            let mut adapter = VueAdapter::new(project_path.to_str().unwrap());
+            adapter.start().await?;
+            analyzer.build_call_graph(&mut adapter).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            adapter.stop()?;
+        }
+        "java" => {
+            let mut adapter = JavaAdapter::new(project_path.to_str().unwrap());
             adapter.start().await?;
             analyzer.build_call_graph(&mut adapter).await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
