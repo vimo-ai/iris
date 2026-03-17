@@ -28,7 +28,7 @@ pub type Result<T> = std::result::Result<T, LspError>;
 /// LSP 客户端 - 管理与语言服务器的通信
 pub struct LspClient {
     process: Option<Child>,
-    stdin: Option<ChildStdin>,
+    stdin: Option<Arc<Mutex<ChildStdin>>>,
     request_id: Arc<Mutex<i64>>,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
     workspace: String,
@@ -61,7 +61,9 @@ impl LspClient {
         let stdout = child.stdout.take().ok_or(LspError::NotStarted)?;
         let stderr = child.stderr.take();
 
-        self.stdin = Some(stdin);
+        // stdin 需要在响应线程和主线程之间共享
+        let stdin = Arc::new(Mutex::new(stdin));
+        self.stdin = Some(Arc::clone(&stdin));
 
         // 启动 stderr 读取线程
         if let Some(stderr) = stderr {
@@ -79,15 +81,28 @@ impl LspClient {
         // 启动响应读取线程
         let pending = Arc::clone(&self.pending);
         std::thread::spawn(move || {
-            Self::read_responses(stdout, pending);
+            Self::read_responses(stdout, pending, stdin);
         });
 
         self.process = Some(child);
         Ok(())
     }
 
-    /// 读取 LSP 响应
-    fn read_responses(stdout: ChildStdout, pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>) {
+    /// 向 stdin 写入 LSP 消息
+    fn write_message(stdin: &Arc<Mutex<ChildStdin>>, msg: &str) -> std::result::Result<(), std::io::Error> {
+        let header = format!("Content-Length: {}\r\n\r\n", msg.len());
+        let mut stdin = stdin.lock().unwrap();
+        stdin.write_all(header.as_bytes())?;
+        stdin.write_all(msg.as_bytes())?;
+        stdin.flush()
+    }
+
+    /// 读取 LSP 响应，并自动回复服务端→客户端请求
+    fn read_responses(
+        stdout: ChildStdout,
+        pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
+        stdin: Arc<Mutex<ChildStdin>>,
+    ) {
         let mut reader = BufReader::new(stdout);
         let mut buffer = String::new();
 
@@ -126,9 +141,54 @@ impl LspClient {
             }
 
             if let Ok(msg) = serde_json::from_slice::<Value>(&body) {
-                if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
-                    if let Some(sender) = pending.lock().unwrap().remove(&id) {
-                        let _ = sender.send(msg);
+                let has_id = msg.get("id").is_some();
+                let has_method = msg.get("method").is_some();
+
+                if has_id && has_method {
+                    // 服务端→客户端请求 (同时有 id 和 method)
+                    // 自动回复 null result，防止服务端阻塞
+                    if let Some(id) = msg.get("id") {
+                        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("unknown");
+                        tracing::debug!("[LSP] 自动回复服务端请求: {} (id={})", method, id);
+                        let response = json!({
+                            "jsonrpc": "2.0",
+                            "id": id.clone(),
+                            "result": null
+                        });
+                        if let Ok(resp_str) = serde_json::to_string(&response) {
+                            let _ = Self::write_message(&stdin, &resp_str);
+                        }
+                    }
+                } else if has_id {
+                    // 服务端响应 (只有 id，没有 method)
+                    if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
+                        if let Some(sender) = pending.lock().unwrap().remove(&id) {
+                            let _ = sender.send(msg);
+                        }
+                    }
+                } else if has_method {
+                    // 纯通知 — 处理需要回复的特殊通知
+                    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+                    if method == "tsserver/request" {
+                        // vue-language-server (Volar) 专用: 通过通知转发 tsserver 请求
+                        // 需要回复 tsserver/response 通知，否则 Volar 会阻塞
+                        if let Some(params) = msg.get("params").and_then(|p| p.as_array()) {
+                            for req in params {
+                                if let Some(req_arr) = req.as_array() {
+                                    if let Some(req_id) = req_arr.first() {
+                                        tracing::debug!("[LSP] 回复 tsserver/request (id={})", req_id);
+                                        let response = json!({
+                                            "jsonrpc": "2.0",
+                                            "method": "tsserver/response",
+                                            "params": [[req_id.clone(), null]]
+                                        });
+                                        if let Ok(resp_str) = serde_json::to_string(&response) {
+                                            let _ = Self::write_message(&stdin, &resp_str);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -151,16 +211,13 @@ impl LspClient {
         });
 
         let msg = serde_json::to_string(&request)?;
-        let header = format!("Content-Length: {}\r\n\r\n", msg.len());
 
         // 先注册等待响应的 channel，避免竞态条件
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
 
-        let stdin = self.stdin.as_mut().ok_or(LspError::NotStarted)?;
-        stdin.write_all(header.as_bytes())?;
-        stdin.write_all(msg.as_bytes())?;
-        stdin.flush()?;
+        let stdin = self.stdin.as_ref().ok_or(LspError::NotStarted)?;
+        Self::write_message(stdin, &msg).map_err(LspError::Io)?;
 
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(30),
@@ -187,23 +244,24 @@ impl LspClient {
         });
 
         let msg = serde_json::to_string(&notification)?;
-        let header = format!("Content-Length: {}\r\n\r\n", msg.len());
-
-        let stdin = self.stdin.as_mut().ok_or(LspError::NotStarted)?;
-        stdin.write_all(header.as_bytes())?;
-        stdin.write_all(msg.as_bytes())?;
-        stdin.flush()?;
+        let stdin = self.stdin.as_ref().ok_or(LspError::NotStarted)?;
+        Self::write_message(stdin, &msg).map_err(LspError::Io)?;
 
         Ok(())
     }
 
     /// 初始化握手
     pub async fn initialize(&mut self) -> Result<InitializeResult> {
+        self.initialize_with_options(json!({})).await
+    }
+
+    /// 带自定义选项的初始化握手
+    pub async fn initialize_with_options(&mut self, init_options: Value) -> Result<InitializeResult> {
         let root_uri = Url::from_file_path(&self.workspace)
             .map_err(|_| LspError::Protocol("Invalid workspace path".into()))?
             .to_string();
 
-        let result: InitializeResult = self.request("initialize", json!({
+        let mut params = json!({
             "rootUri": root_uri,
             "capabilities": {
                 "textDocument": {
@@ -218,7 +276,15 @@ impl LspClient {
                     }
                 }
             }
-        })).await?;
+        });
+
+        // 合并 initializationOptions
+        if !init_options.is_null() && init_options != json!({}) {
+            params.as_object_mut().unwrap()
+                .insert("initializationOptions".to_string(), init_options);
+        }
+
+        let result: InitializeResult = self.request("initialize", params).await?;
 
         self.notify("initialized", json!({}))?;
 
