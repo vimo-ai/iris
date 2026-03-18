@@ -172,20 +172,18 @@ impl LspClient {
                     if method == "tsserver/request" {
                         // vue-language-server (Volar) 专用: 通过通知转发 tsserver 请求
                         // 需要回复 tsserver/response 通知，否则 Volar 会阻塞
+                        // Volar 发送格式: params = [requestId, command, args]
+                        // Volar 接收格式: params = [requestId, result]
                         if let Some(params) = msg.get("params").and_then(|p| p.as_array()) {
-                            for req in params {
-                                if let Some(req_arr) = req.as_array() {
-                                    if let Some(req_id) = req_arr.first() {
-                                        tracing::debug!("[LSP] 回复 tsserver/request (id={})", req_id);
-                                        let response = json!({
-                                            "jsonrpc": "2.0",
-                                            "method": "tsserver/response",
-                                            "params": [[req_id.clone(), null]]
-                                        });
-                                        if let Ok(resp_str) = serde_json::to_string(&response) {
-                                            let _ = Self::write_message(&stdin, &resp_str);
-                                        }
-                                    }
+                            if let Some(req_id) = params.first() {
+                                tracing::debug!("[LSP] 回复 tsserver/request (id={})", req_id);
+                                let response = json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "tsserver/response",
+                                    "params": [req_id.clone(), null]
+                                });
+                                if let Ok(resp_str) = serde_json::to_string(&response) {
+                                    let _ = Self::write_message(&stdin, &resp_str);
                                 }
                             }
                         }
